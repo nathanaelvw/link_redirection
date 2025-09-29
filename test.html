@@ -1,0 +1,110 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Daily Form Gate</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.45 system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100dvh; }
+  .card { max-width: 560px; padding: 24px; border: 1px solid #ccc; border-radius: 12px; }
+  h1 { margin: 0 0 12px; font-size: 1.25rem; }
+  .ok { color: green; }
+  .ng { color: #b00020; }
+  button { padding: 10px 14px; border-radius: 8px; border: 1px solid #888; cursor: pointer; }
+  small { color: #666; }
+</style>
+<div class="card">
+  <h1 id="state">Checking time…</h1>
+  <p id="msg">Please wait.</p>
+  <p><button id="openBtn" hidden>Open form</button></p>
+  <p><small id="nextInfo"></small></p>
+</div>
+
+<script>
+/* ================== CONFIGURE THESE ================== */
+const FORM_URL   = "https://forms.office.com/r/YOUR_CODE_HERE"; // <-- put your MS Forms link here
+const TIMEZONE   = "Asia/Jakarta";
+const CUTOFF_H   = 9;      // 09:00
+const CUTOFF_M   = 0;
+/* ===================================================== */
+
+/* Get "now" inside a specific IANA timezone (no libraries) */
+function nowInTZ(tz) {
+  const now = new Date();
+  // Build parts in that tz
+  const fmt = new Intl.DateTimeFormat('en-CA', { // en-CA = ISO-like yyyy-mm-dd
+    timeZone: tz, hour12: false,
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit'
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(now).map(p => [p.type, p.value]));
+  // Construct a local-like ISO string and parse as if local—but we only compare within same tz-constructed dates
+  return new Date(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`);
+}
+
+function todayCutoffInTZ(tz, hour, minute) {
+  const n = nowInTZ(tz);
+  const y = n.getFullYear();
+  const m = n.getMonth();     // 0-based
+  const d = n.getDate();
+  // Build “tz today at cutoff”
+  const fmt = new Intl.DateTimeFormat('en-CA',{ timeZone: tz, hour12:false, year:'numeric', month:'2-digit', day:'2-digit' });
+  const parts = Object.fromEntries(fmt.formatToParts(n).map(p => [p.type, p.value]));
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+  return new Date(`${dateStr}T${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}:00`);
+}
+
+function nextOpenWindowText(tz, hour, minute) {
+  // Next window starts at midnight (00:00) tomorrow; ends at cutoff
+  const n = nowInTZ(tz);
+  const tomorrow = new Date(n); tomorrow.setDate(n.getDate() + 1);
+  const fmtDay = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', day:'2-digit', month:'short', year:'numeric' });
+  const dateTxt = fmtDay.format(tomorrow);
+  const cutoffTxt = `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
+  return `Next window: 00:00–${cutoffTxt} (${tz}), ${dateTxt}.`;
+}
+
+(async function main(){
+  const $state = document.getElementById('state');
+  const $msg   = document.getElementById('msg');
+  const $btn   = document.getElementById('openBtn');
+  const $next  = document.getElementById('nextInfo');
+
+  // Option A (default): use device time in Asia/Jakarta
+  let now = nowInTZ(TIMEZONE);
+  let cutoff = todayCutoffInTZ(TIMEZONE, CUTOFF_H, CUTOFF_M);
+
+  // (Optional) Option B: get trusted time from a public API (no server needed, but requires internet).
+  // Uncomment to prefer API time; falls back to device time if it fails.
+  /*
+  try {
+    const r = await fetch("https://worldtimeapi.org/api/timezone/" + encodeURIComponent(TIMEZONE), {cache:"no-store"});
+    if (r.ok) {
+      const j = await r.json();
+      now = new Date(j.datetime);
+      // Recompute "today" in that tz for cutoff
+      const fmt = new Intl.DateTimeFormat('en-CA',{ timeZone: TIMEZONE, hour12:false, year:'numeric', month:'2-digit', day:'2-digit' });
+      const parts = Object.fromEntries(fmt.formatToParts(now).map(p => [p.type, p.value]));
+      cutoff = new Date(`${parts.year}-${parts.month}-${parts.day}T${String(CUTOFF_H).padStart(2,'0')}:${String(CUTOFF_M).padStart(2,'0')}:00`);
+    }
+  } catch {}
+  */
+
+  if (now < cutoff) {
+    $state.textContent = "Form is OPEN";
+    $state.className = "ok";
+    $msg.textContent = "You’ll be redirected to the form.";
+    $btn.hidden = false;
+    $btn.textContent = "Open the form now";
+    $btn.onclick = () => location.href = FORM_URL;
+    // auto-redirect after a brief pause
+    setTimeout(() => location.href = FORM_URL, 1200);
+    $next.textContent = `Closes today at ${String(CUTOFF_H).padStart(2,'0')}:${String(CUTOFF_M).padStart(2,'0')} (${TIMEZONE}).`;
+  } else {
+    $state.textContent = "Form is CLOSED";
+    $state.className = "ng";
+    $msg.textContent = "This form is only available daily before the cutoff time.";
+    $btn.hidden = true;
+    $next.textContent = nextOpenWindowText(TIMEZONE, CUTOFF_H, CUTOFF_M);
+  }
+})();
+</script>
